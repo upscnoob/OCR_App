@@ -1,3 +1,4 @@
 streamlit
 mistralai
 requests
+streamlit-local-storage
