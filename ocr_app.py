@@ -6,6 +6,7 @@ import requests
 import re
 import io
 import base64 
+from streamlit_local_storage import LocalStorage # <-- 1. IMPORT THE NEW LIBRARY
 
 # --- Constants ---
 SUPPORTED_IMAGE_TYPES = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
@@ -80,8 +81,6 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str, is_image
         signed_url = client.files.get_signed_url(file_id=mistral_uploaded_file.id, expiry=60)
         
         # 3. Run OCR
-        # We use DocumentURLChunk for *both* images and PDFs
-        # when using a signed URL from the files API.
         ocr_response = client.ocr.process(
             document=DocumentURLChunk(document_url=signed_url.url),
             model="mistral-ocr-latest",
@@ -92,18 +91,14 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str, is_image
         return get_combined_markdown_optimized(ocr_response)
 
     except Exception as e:
-        # Re-raise the exception so Streamlit can catch it
         raise e
         
     finally:
-        # 5. CRITICAL: Clean up the file from Mistral servers
         if client and mistral_uploaded_file:
             try:
-                # The updated mistralai library should handle this delete call correctly
                 client.files.delete(mistral_uploaded_file.id)
                 print(f"Successfully deleted temporary file: {mistral_uploaded_file.id}")
             except Exception as e:
-                # Log error, but don't stop the app
                 print(f"Error deleting file {mistral_uploaded_file.id}: {e}")
 
 
@@ -111,6 +106,8 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str, is_image
 
 st.set_page_config(layout="wide")
 st.title("Mistral OCR Interface")
+
+localS = LocalStorage() # <-- 2. INITIALIZE THE LIBRARY
 
 # --- Initialize Session State ---
 if 'combined_markdown' not in st.session_state: st.session_state.combined_markdown = None
@@ -124,8 +121,24 @@ if 'is_pdf' not in st.session_state: st.session_state.is_pdf = False
 with st.sidebar:
     st.header("⚙️ Controls")
     
-    # --- API Key Input ---
-    api_key = st.text_input("Enter your Mistral API Key:", type="password", key="api_key_input")
+    # --- API Key Input (THIS IS THE MODIFIED SECTION) ---
+    
+    # 3. Try to get the key from browser storage
+    api_key_from_storage = localS.getItem("mistral_api_key")
+    
+    # 4. Use the stored key as the default value for the text input
+    api_key = st.text_input(
+        "Enter your Mistral API Key:",
+        type="password",
+        value=api_key_from_storage if api_key_from_storage else ""
+    )
+
+    # 5. If the user entered a new key, save it to storage
+    if api_key and api_key != api_key_from_storage:
+        localS.setItem("mistral_api_key", api_key)
+        st.success("API Key saved to browser.")
+
+    # --- End of modified section ---
 
     # --- File Input ---
     st.subheader("Upload File or Enter URL")
@@ -167,16 +180,12 @@ with st.sidebar:
             file_name_stem = "file_from_url"
         
         is_image = any(original_name_or_url.lower().endswith(ext) for ext in SUPPORTED_IMAGE_TYPES)
-        
-        # --- THIS LINE IS NOW FIXED ---
         is_pdf = original_name_or_url.lower().endswith('.pdf')
-        # --- END OF FIX ---
         
         st.session_state.current_file_name_stem = file_name_stem
         st.session_state.is_image = is_image
         st.session_state.is_pdf = is_pdf
     else:
-        # Clear if no file is present
         st.session_state.uploaded_file_data = None
 
 
@@ -189,12 +198,11 @@ with st.sidebar:
             st.session_state.combined_markdown = None
             st.session_state.ocr_error = None
             try:
-                # Call the new cached function
                 st.session_state.combined_markdown = get_ocr_result(
                     api_key,
                     uploaded_file_data,
                     file_name_stem,
-                    is_image # Note: this 'is_image' flag is not actually used by get_ocr_result anymore, but it's fine to pass
+                    is_image 
                 )
                 st.success("OCR Complete!")
             except Exception as e:
@@ -203,14 +211,12 @@ with st.sidebar:
 
     with col2:
         if st.button("🧹 Clear", key="clear_button", use_container_width=True):
-            # Clear all session state
             st.session_state.combined_markdown = None
             st.session_state.ocr_error = None
             st.session_state.current_file_name_stem = "ocr_result"
             st.session_state.uploaded_file_data = None
             st.session_state.is_image = False
             st.session_state.is_pdf = False
-            # Clear file uploader and URL input by re-running
             st.rerun()
 
 # --- Display Results ---
@@ -218,7 +224,6 @@ with st.sidebar:
 if st.session_state.get('ocr_error'):
     st.error(f"Last OCR attempt failed: {st.session_state.ocr_error}")
 
-# Use columns for side-by-side view
 col_input, col_output = st.columns(2)
 
 with col_input:
@@ -237,19 +242,16 @@ with col_input:
 with col_output:
     st.subheader("OCR Results (Rendered)")
     if st.session_state.get('combined_markdown'):
-        # --- Download Button ---
-        download_filename = f"{st.session_state.current_file_name_stem}_ocr_result.md"
         st.download_button(
             label="⬇️ Download Markdown (.md)",
             data=st.session_state.combined_markdown,
-            file_name=download_filename,
+            file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
             mime="text/markdown",
             key="download_markdown_button_top",
             help="Downloads the raw Markdown code including embedded base64 images."
         )
         
-        # --- Rendered Output ---
-        with st.container(height=600): # Fixed height container
+        with st.container(height=600): 
             st.markdown(st.session_state.combined_markdown, unsafe_allow_html=True)
     else:
         st.info("OCR results will be rendered here.")
