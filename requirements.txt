@@ -2,4 +2,3 @@ streamlit
 mistralai
 requests
 streamlit-local-storage
-st-copy-to-clipboard
