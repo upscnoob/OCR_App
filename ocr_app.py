@@ -7,7 +7,7 @@ import re
 import io
 import base64 
 from streamlit_local_storage import LocalStorage
-from streamlit_clipboard import st_clipboard # <-- 1. IMPORT NEW LIBRARY
+from st_copy_to_clipboard import st_copy_to_clipboard # <-- 1. IMPORT NAME CORRECTED
 
 # --- Constants ---
 SUPPORTED_IMAGE_TYPES = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
@@ -102,7 +102,7 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str) -> str:
             except Exception as e:
                 print(f"Error deleting file {mistral_uploaded_file.id}: {e}")
 
-# --- 2. NEW OCR TRIGGER FUNCTION ---
+# --- OCR TRIGGER FUNCTION ---
 def trigger_ocr(api_key, file_data, file_name):
     """Helper function to run OCR and set session state."""
     st.session_state.combined_markdown = None
@@ -124,7 +124,6 @@ st.title("Mistral OCR Interface")
 localS = LocalStorage()
 
 # --- Initialize Session State ---
-# We use 'uploaded_file_bytes' to track the *current* file
 if 'uploaded_file_bytes' not in st.session_state: st.session_state.uploaded_file_bytes = None
 if 'combined_markdown' not in st.session_state: st.session_state.combined_markdown = None
 if 'ocr_error' not in st.session_state: st.session_state.ocr_error = None
@@ -147,7 +146,7 @@ with st.sidebar:
         localS.setItem("mistral_api_key", api_key)
         st.success("API Key saved to browser.")
 
-    # --- 3. NEW AUTO-RUN SETTING ---
+    # --- AUTO-RUN SETTING ---
     st.subheader("Settings")
     auto_run_from_storage = localS.getItem("auto_run_ocr")
     auto_run_enabled = st.toggle(
@@ -187,16 +186,12 @@ with st.sidebar:
                 new_file_data = get_data_from_url(file_url) # Use cached function
                 original_name_or_url = file_url
 
-    # --- 4. MODIFIED FILE & AUTO-RUN LOGIC ---
-    
-    # Check if a new file has been uploaded
+    # --- FILE & AUTO-RUN LOGIC ---
     is_new_file = (new_file_data is not None and new_file_data != st.session_state.uploaded_file_bytes)
     
     if is_new_file:
-        # A new file has been provided. Save it to session state.
         st.session_state.uploaded_file_bytes = new_file_data
         
-        # Process file name and type
         try:
             path_part = original_name_or_url.split('/')[-1].split('?')[0]
             file_name_stem = Path(path_part).stem if path_part else "file_from_url"
@@ -210,10 +205,8 @@ with st.sidebar:
         st.session_state.is_image = is_image
         st.session_state.is_pdf = is_pdf
         
-        # --- HERE IS THE AUTO-RUN TRIGGER ---
         if auto_run_enabled:
             if api_key:
-                # Trigger the OCR process automatically
                 trigger_ocr(api_key, st.session_state.uploaded_file_bytes, st.session_state.current_file_name_stem)
             else:
                 st.warning("Auto-run is on, but API key is missing.")
@@ -229,13 +222,10 @@ with st.sidebar:
     with col1:
         run_disabled = (not api_key or not st.session_state.uploaded_file_bytes)
         
-        # Only show the "Run" button if auto-run is OFF
         if not auto_run_enabled:
             if st.button("🚀 Run OCR", disabled=run_disabled, key="run_button", use_container_width=True):
-                # Trigger the OCR process manually
                 trigger_ocr(api_key, st.session_state.uploaded_file_bytes, st.session_state.current_file_name_stem)
         else:
-            # Show a disabled button if auto-run is ON
             st.button("🚀 Run OCR", disabled=True, key="run_button", use_container_width=True, help="Auto-run is enabled. Upload a new file to start.")
 
     with col2:
@@ -270,7 +260,7 @@ with col_output:
     st.subheader("OCR Results (Rendered)")
     if st.session_state.get('combined_markdown'):
         
-        # --- 5. NEW DOWNLOAD/COPY BUTTONS ---
+        # --- DOWNLOAD/COPY BUTTONS ---
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             st.download_button(
@@ -280,12 +270,15 @@ with col_output:
                 mime="text/markdown",
                 key="download_markdown_button_top",
                 help="Downloads the raw Markdown code including embedded base64 images.",
-                use_container_width=True # Make it fill its column
+                use_container_width=True
             )
         with btn_col2:
-            st_clipboard(
-                label="📋 Copy to Clipboard",
-                text=st.session_state.combined_markdown,
+            # --- 2. FUNCTION CALL CORRECTED ---
+            # This function creates a button and handles the copy logic.
+            st_copy_to_clipboard(
+                text=st.session_state.combined_markdown, 
+                label="📋 Copy to Clipboard", 
+                success_message="Copied!", 
                 key="copy_button"
             )
         
