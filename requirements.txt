@@ -2,3 +2,4 @@ streamlit
 mistralai
 requests
 streamlit-local-storage
+streamlit-clipboard
