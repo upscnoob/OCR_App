@@ -6,8 +6,7 @@ import requests
 import re
 import io
 import base64 
-from streamlit_local_storage import LocalStorage
-from st_copy_to_clipboard import st_copy_to_clipboard # <-- 1. IMPORT NAME CORRECTED
+from streamlit_local_storage import LocalStorage # <-- 1. IMPORT THE NEW LIBRARY
 
 # --- Constants ---
 SUPPORTED_IMAGE_TYPES = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
@@ -61,7 +60,7 @@ def get_data_from_url(url: str) -> bytes:
         return None
 
 @st.cache_data(show_spinner="Uploading file and running OCR... This may take a moment.")
-def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str) -> str:
+def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str, is_image: bool) -> str:
     """
     Runs the full OCR process and CACHES the result.
     CRITICALLY: Cleans up the uploaded file from Mistral servers.
@@ -102,32 +101,19 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str) -> str:
             except Exception as e:
                 print(f"Error deleting file {mistral_uploaded_file.id}: {e}")
 
-# --- OCR TRIGGER FUNCTION ---
-def trigger_ocr(api_key, file_data, file_name):
-    """Helper function to run OCR and set session state."""
-    st.session_state.combined_markdown = None
-    st.session_state.ocr_error = None
-    try:
-        st.session_state.combined_markdown = get_ocr_result(
-            api_key, file_data, file_name
-        )
-        st.success("OCR Complete!")
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-        st.session_state.ocr_error = str(e)
 
 # --- Streamlit App ---
 
 st.set_page_config(layout="wide")
 st.title("Mistral OCR Interface")
 
-localS = LocalStorage()
+localS = LocalStorage() # <-- 2. INITIALIZE THE LIBRARY
 
 # --- Initialize Session State ---
-if 'uploaded_file_bytes' not in st.session_state: st.session_state.uploaded_file_bytes = None
 if 'combined_markdown' not in st.session_state: st.session_state.combined_markdown = None
 if 'ocr_error' not in st.session_state: st.session_state.ocr_error = None
 if 'current_file_name_stem' not in st.session_state: st.session_state.current_file_name_stem = "ocr_result"
+if 'uploaded_file_data' not in st.session_state: st.session_state.uploaded_file_data = None
 if 'is_image' not in st.session_state: st.session_state.is_image = False
 if 'is_pdf' not in st.session_state: st.session_state.is_pdf = False
 
@@ -135,33 +121,30 @@ if 'is_pdf' not in st.session_state: st.session_state.is_pdf = False
 with st.sidebar:
     st.header("⚙️ Controls")
     
-    # --- API Key Input ---
+    # --- API Key Input (THIS IS THE MODIFIED SECTION) ---
+    
+    # 3. Try to get the key from browser storage
     api_key_from_storage = localS.getItem("mistral_api_key")
+    
+    # 4. Use the stored key as the default value for the text input
     api_key = st.text_input(
         "Enter your Mistral API Key:",
         type="password",
         value=api_key_from_storage if api_key_from_storage else ""
     )
+
+    # 5. If the user entered a new key, save it to storage
     if api_key and api_key != api_key_from_storage:
         localS.setItem("mistral_api_key", api_key)
         st.success("API Key saved to browser.")
 
-    # --- AUTO-RUN SETTING ---
-    st.subheader("Settings")
-    auto_run_from_storage = localS.getItem("auto_run_ocr")
-    auto_run_enabled = st.toggle(
-        "Auto-run OCR on upload",
-        value=auto_run_from_storage if auto_run_from_storage else False,
-        help="If on, OCR will start immediately after a file is selected."
-    )
-    if auto_run_enabled != auto_run_from_storage:
-        localS.setItem("auto_run_ocr", auto_run_enabled)
+    # --- End of modified section ---
 
     # --- File Input ---
     st.subheader("Upload File or Enter URL")
     upload_option = st.radio("Choose input method:", ("Upload from Computer", "Enter URL"), key="input_method")
     
-    new_file_data = None
+    uploaded_file_data = None
     file_name_stem = "ocr_result"
     is_image = False
     is_pdf = False
@@ -174,8 +157,9 @@ with st.sidebar:
             key="file_uploader"
         )
         if uploaded_file is not None:
-            new_file_data = uploaded_file.getvalue()
+            uploaded_file_data = uploaded_file.getvalue()
             original_name_or_url = uploaded_file.name
+            st.session_state.uploaded_file_data = uploaded_file_data # Save for display
     
     elif upload_option == "Enter URL":
         file_url = st.text_input("Enter File URL (PDF or Image):", key="url_input")
@@ -183,15 +167,12 @@ with st.sidebar:
             if not (file_url.startswith("http://") or file_url.startswith("https://")):
                 st.error("Invalid URL format. Must start with http:// or https://")
             else:
-                new_file_data = get_data_from_url(file_url) # Use cached function
+                uploaded_file_data = get_data_from_url(file_url) # Use cached function
                 original_name_or_url = file_url
+                st.session_state.uploaded_file_data = uploaded_file_data # Save for display
 
-    # --- FILE & AUTO-RUN LOGIC ---
-    is_new_file = (new_file_data is not None and new_file_data != st.session_state.uploaded_file_bytes)
-    
-    if is_new_file:
-        st.session_state.uploaded_file_bytes = new_file_data
-        
+    # --- Process File Name and Type ---
+    if uploaded_file_data:
         try:
             path_part = original_name_or_url.split('/')[-1].split('?')[0]
             file_name_stem = Path(path_part).stem if path_part else "file_from_url"
@@ -204,36 +185,36 @@ with st.sidebar:
         st.session_state.current_file_name_stem = file_name_stem
         st.session_state.is_image = is_image
         st.session_state.is_pdf = is_pdf
-        
-        if auto_run_enabled:
-            if api_key:
-                trigger_ocr(api_key, st.session_state.uploaded_file_bytes, st.session_state.current_file_name_stem)
-            else:
-                st.warning("Auto-run is on, but API key is missing.")
-    
-    elif upload_option == "Upload from Computer" and uploaded_file is None:
-         st.session_state.uploaded_file_bytes = None # Clear if file is removed
-    elif upload_option == "Enter URL" and not file_url:
-         st.session_state.uploaded_file_bytes = None # Clear if URL is removed
+    else:
+        st.session_state.uploaded_file_data = None
+
 
     # --- Process & Clear Buttons ---
     col1, col2 = st.columns(2)
     
     with col1:
-        run_disabled = (not api_key or not st.session_state.uploaded_file_bytes)
-        
-        if not auto_run_enabled:
-            if st.button("🚀 Run OCR", disabled=run_disabled, key="run_button", use_container_width=True):
-                trigger_ocr(api_key, st.session_state.uploaded_file_bytes, st.session_state.current_file_name_stem)
-        else:
-            st.button("🚀 Run OCR", disabled=True, key="run_button", use_container_width=True, help="Auto-run is enabled. Upload a new file to start.")
+        run_disabled = (not api_key or not uploaded_file_data)
+        if st.button("🚀 Run OCR", disabled=run_disabled, key="run_button", use_container_width=True):
+            st.session_state.combined_markdown = None
+            st.session_state.ocr_error = None
+            try:
+                st.session_state.combined_markdown = get_ocr_result(
+                    api_key,
+                    uploaded_file_data,
+                    file_name_stem,
+                    is_image 
+                )
+                st.success("OCR Complete!")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+                st.session_state.ocr_error = str(e)
 
     with col2:
         if st.button("🧹 Clear", key="clear_button", use_container_width=True):
             st.session_state.combined_markdown = None
             st.session_state.ocr_error = None
             st.session_state.current_file_name_stem = "ocr_result"
-            st.session_state.uploaded_file_bytes = None
+            st.session_state.uploaded_file_data = None
             st.session_state.is_image = False
             st.session_state.is_pdf = False
             st.rerun()
@@ -247,42 +228,29 @@ col_input, col_output = st.columns(2)
 
 with col_input:
     st.subheader("Your File")
-    if st.session_state.uploaded_file_bytes:
+    if st.session_state.uploaded_file_data:
         if st.session_state.is_image:
-            st.image(st.session_state.uploaded_file_bytes, use_container_width=True)
+            st.image(st.session_state.uploaded_file_data, use_container_width=True)
+            
         elif st.session_state.is_pdf:
-            pdf_html = display_pdf(st.session_state.uploaded_file_bytes, height=600)
+            pdf_html = display_pdf(st.session_state.uploaded_file_data, height=600)
             st.markdown(pdf_html, unsafe_allow_html=True)
+            
     else:
         st.info("Your uploaded file will be displayed here.")
 
 with col_output:
     st.subheader("OCR Results (Rendered)")
     if st.session_state.get('combined_markdown'):
+        st.download_button(
+            label="⬇️ Download Markdown (.md)",
+            data=st.session_state.combined_markdown,
+            file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
+            mime="text/markdown",
+            key="download_markdown_button_top",
+            help="Downloads the raw Markdown code including embedded base64 images."
+        )
         
-        # --- DOWNLOAD/COPY BUTTONS ---
-        btn_col1, btn_col2 = st.columns(2)
-        with btn_col1:
-            st.download_button(
-                label="⬇️ Download Markdown (.md)",
-                data=st.session_state.combined_markdown,
-                file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
-                mime="text/markdown",
-                key="download_markdown_button_top",
-                help="Downloads the raw Markdown code including embedded base64 images.",
-                use_container_width=True
-            )
-        with btn_col2:
-            # --- 2. FUNCTION CALL CORRECTED ---
-            # This function creates a button and handles the copy logic.
-            st_copy_to_clipboard(
-                text=st.session_state.combined_markdown, 
-                label="📋 Copy to Clipboard", 
-                success_message="Copied!", 
-                key="copy_button"
-            )
-        
-        # --- Rendered Output ---
         with st.container(height=600): 
             st.markdown(st.session_state.combined_markdown, unsafe_allow_html=True)
     else:
