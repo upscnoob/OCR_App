@@ -43,11 +43,11 @@ def display_pdf(pdf_data: bytes, height: int = 600) -> str:
     pdf_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="{height}px" type="application/pdf"></iframe>'
     return pdf_html
 
-# --- NEW FUNCTION: Generate Publish-Ready HTML ---
-def create_html_content(markdown_text: str, page_title: str) -> str:
+# --- NEW FUNCTION: Generate Standalone HTML ---
+def create_html_content(markdown_text: str) -> str:
     """
-    Wraps the markdown in a standalone, publish-ready HTML template.
-    Includes SEO-friendly structure, robust MathJax config, and professional styling.
+    Wraps the markdown in a standalone HTML template with MathJax and Marked.js 
+    for perfect rendering in any browser.
     """
     html_template = f"""
     <!DOCTYPE html>
@@ -55,69 +55,40 @@ def create_html_content(markdown_text: str, page_title: str) -> str:
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta name="generator" content="Mistral OCR">
-        <title>{page_title}</title>
-        
+        <title>OCR Output</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
-        
         <style>
-            body {{
-                background-color: #f6f8fa;
-                font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;
-                margin: 0;
-                padding: 20px;
-            }}
             .markdown-body {{
                 box-sizing: border-box;
                 min-width: 200px;
                 max-width: 980px;
                 margin: 0 auto;
                 padding: 45px;
-                background-color: white;
-                border: 1px solid #d0d7de;
-                border-radius: 6px;
-                box-shadow: 0 3px 6px rgba(140, 149, 159, 0.15);
             }}
             @media (max-width: 767px) {{
                 .markdown-body {{
                     padding: 15px;
                 }}
-                body {{
-                    padding: 10px;
-                }}
             }}
             /* Ensure images fit within the container */
             img {{
                 max-width: 100%;
-                display: block;
-                margin: 1em auto;
-            }}
-            /* Print styling to ensure it looks good on paper/PDF */
-            @media print {{
-                body {{ background-color: white; }}
-                .markdown-body {{ border: none; box-shadow: none; padding: 0; }}
             }}
         </style>
-        
         <script>
         MathJax = {{
             tex: {{
-                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-                displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
-                processEscapes: true
+                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']]
             }}
         }};
         </script>
         <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-        
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     </head>
-    <body>
+    <body class="markdown-body">
         <div id="raw-markdown" style="display:none;">{markdown_text}</div>
         
-        <article class="markdown-body" id="content">
-            <p style="color:#666; text-align:center;">Loading content...</p>
-        </article>
+        <div id="content"></div>
 
         <script>
             // Get raw markdown
@@ -349,17 +320,16 @@ with col_output:
             )
         
         with btn_col2:
-            # Generate the HTML content with a professional title
-            html_title = st.session_state.current_file_name_stem.replace("_", " ").title()
-            html_content = create_html_content(st.session_state.combined_markdown, html_title)
+            # Generate the HTML content on the fly using the new helper function
+            html_content = create_html_content(st.session_state.combined_markdown)
             
             st.download_button(
-                label="🌐 Download Website (.html)",
+                label="🌐 Download HTML Report",
                 data=html_content,
                 file_name=f"{st.session_state.current_file_name_stem}_ocr_result.html",
                 mime="text/html",
                 key="download_html_button_top",
-                help="Downloads a publish-ready HTML file you can view in any browser.",
+                help="Downloads a standalone HTML file you can view in Chrome/Edge/Firefox.",
                 use_container_width=True
             )
         # ------------------------------------------------------------
