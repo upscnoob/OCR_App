@@ -6,7 +6,7 @@ import requests
 import re
 import io
 import base64 
-from streamlit_local_storage import LocalStorage # <-- 1. IMPORT THE NEW LIBRARY
+from streamlit_local_storage import LocalStorage
 
 # --- Constants ---
 SUPPORTED_IMAGE_TYPES = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
@@ -42,6 +42,99 @@ def display_pdf(pdf_data: bytes, height: int = 600) -> str:
     base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
     pdf_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="{height}px" type="application/pdf"></iframe>'
     return pdf_html
+
+# --- NEW FUNCTION: Generate Publish-Ready HTML ---
+def create_html_content(markdown_text: str, page_title: str) -> str:
+    """
+    Wraps the markdown in a standalone, publish-ready HTML template.
+    Includes SEO-friendly structure, robust MathJax config, and professional styling.
+    """
+    html_template = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="generator" content="Mistral OCR">
+        <title>{page_title}</title>
+        
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+        
+        <style>
+            body {{
+                background-color: #f6f8fa;
+                font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;
+                margin: 0;
+                padding: 20px;
+            }}
+            .markdown-body {{
+                box-sizing: border-box;
+                min-width: 200px;
+                max-width: 980px;
+                margin: 0 auto;
+                padding: 45px;
+                background-color: white;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                box-shadow: 0 3px 6px rgba(140, 149, 159, 0.15);
+            }}
+            @media (max-width: 767px) {{
+                .markdown-body {{
+                    padding: 15px;
+                }}
+                body {{
+                    padding: 10px;
+                }}
+            }}
+            /* Ensure images fit within the container */
+            img {{
+                max-width: 100%;
+                display: block;
+                margin: 1em auto;
+            }}
+            /* Print styling to ensure it looks good on paper/PDF */
+            @media print {{
+                body {{ background-color: white; }}
+                .markdown-body {{ border: none; box-shadow: none; padding: 0; }}
+            }}
+        </style>
+        
+        <script>
+        MathJax = {{
+            tex: {{
+                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+                displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+                processEscapes: true
+            }}
+        }};
+        </script>
+        <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    </head>
+    <body>
+        <div id="raw-markdown" style="display:none;">{markdown_text}</div>
+        
+        <article class="markdown-body" id="content">
+            <p style="color:#666; text-align:center;">Loading content...</p>
+        </article>
+
+        <script>
+            // Get raw markdown
+            const rawMarkdown = document.getElementById('raw-markdown').textContent;
+            
+            // Render Markdown to HTML
+            document.getElementById('content').innerHTML = marked.parse(rawMarkdown);
+            
+            // Trigger MathJax to process the new content
+            if (typeof MathJax !== 'undefined') {{
+                MathJax.typesetPromise();
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return html_template
 
 # --- Caching Functions ---
 
@@ -107,7 +200,7 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str, is_image
 st.set_page_config(layout="wide")
 st.title("Mistral OCR Interface")
 
-localS = LocalStorage() # <-- 2. INITIALIZE THE LIBRARY
+localS = LocalStorage() 
 
 # --- Initialize Session State ---
 if 'combined_markdown' not in st.session_state: st.session_state.combined_markdown = None
@@ -121,7 +214,7 @@ if 'is_pdf' not in st.session_state: st.session_state.is_pdf = False
 with st.sidebar:
     st.header("⚙️ Controls")
     
-    # --- API Key Input (THIS IS THE MODIFIED SECTION) ---
+    # --- API Key Input ---
     
     # 3. Try to get the key from browser storage
     api_key_from_storage = localS.getItem("mistral_api_key")
@@ -137,8 +230,6 @@ with st.sidebar:
     if api_key and api_key != api_key_from_storage:
         localS.setItem("mistral_api_key", api_key)
         st.success("API Key saved to browser.")
-
-    # --- End of modified section ---
 
     # --- File Input ---
     st.subheader("Upload File or Enter URL")
@@ -242,14 +333,36 @@ with col_input:
 with col_output:
     st.subheader("OCR Results (Rendered)")
     if st.session_state.get('combined_markdown'):
-        st.download_button(
-            label="⬇️ Download Markdown (.md)",
-            data=st.session_state.combined_markdown,
-            file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
-            mime="text/markdown",
-            key="download_markdown_button_top",
-            help="Downloads the raw Markdown code including embedded base64 images."
-        )
+        
+        # --- MODIFIED: Added columns for the two download buttons ---
+        btn_col1, btn_col2 = st.columns(2)
+        
+        with btn_col1:
+            st.download_button(
+                label="⬇️ Download Markdown (.md)",
+                data=st.session_state.combined_markdown,
+                file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
+                mime="text/markdown",
+                key="download_markdown_button_top",
+                help="Downloads the raw Markdown code including embedded base64 images.",
+                use_container_width=True
+            )
+        
+        with btn_col2:
+            # Generate the HTML content with a professional title
+            html_title = st.session_state.current_file_name_stem.replace("_", " ").title()
+            html_content = create_html_content(st.session_state.combined_markdown, html_title)
+            
+            st.download_button(
+                label="🌐 Download Website (.html)",
+                data=html_content,
+                file_name=f"{st.session_state.current_file_name_stem}_ocr_result.html",
+                mime="text/html",
+                key="download_html_button_top",
+                help="Downloads a publish-ready HTML file you can view in any browser.",
+                use_container_width=True
+            )
+        # ------------------------------------------------------------
         
         with st.container(height=600): 
             st.markdown(st.session_state.combined_markdown, unsafe_allow_html=True)
