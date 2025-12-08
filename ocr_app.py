@@ -186,18 +186,12 @@ with st.sidebar:
     st.header("⚙️ Controls")
     
     # --- API Key Input ---
-    
-    # 3. Try to get the key from browser storage
     api_key_from_storage = localS.getItem("mistral_api_key")
-    
-    # 4. Use the stored key as the default value for the text input
     api_key = st.text_input(
         "Enter your Mistral API Key:",
         type="password",
         value=api_key_from_storage if api_key_from_storage else ""
     )
-
-    # 5. If the user entered a new key, save it to storage
     if api_key and api_key != api_key_from_storage:
         localS.setItem("mistral_api_key", api_key)
         st.success("API Key saved to browser.")
@@ -221,7 +215,7 @@ with st.sidebar:
         if uploaded_file is not None:
             uploaded_file_data = uploaded_file.getvalue()
             original_name_or_url = uploaded_file.name
-            st.session_state.uploaded_file_data = uploaded_file_data # Save for display
+            st.session_state.uploaded_file_data = uploaded_file_data 
     
     elif upload_option == "Enter URL":
         file_url = st.text_input("Enter File URL (PDF or Image):", key="url_input")
@@ -229,9 +223,9 @@ with st.sidebar:
             if not (file_url.startswith("http://") or file_url.startswith("https://")):
                 st.error("Invalid URL format. Must start with http:// or https://")
             else:
-                uploaded_file_data = get_data_from_url(file_url) # Use cached function
+                uploaded_file_data = get_data_from_url(file_url) 
                 original_name_or_url = file_url
-                st.session_state.uploaded_file_data = uploaded_file_data # Save for display
+                st.session_state.uploaded_file_data = uploaded_file_data 
 
     # --- Process File Name and Type ---
     if uploaded_file_data:
@@ -259,6 +253,11 @@ with st.sidebar:
         if st.button("🚀 Run OCR", disabled=run_disabled, key="run_button", use_container_width=True):
             st.session_state.combined_markdown = None
             st.session_state.ocr_error = None
+            
+            # --- CRITICAL FIX: Reset the editor state so it picks up the new text ---
+            if "markdown_editor" in st.session_state:
+                del st.session_state.markdown_editor
+
             try:
                 st.session_state.combined_markdown = get_ocr_result(
                     api_key,
@@ -279,6 +278,8 @@ with st.sidebar:
             st.session_state.uploaded_file_data = None
             st.session_state.is_image = False
             st.session_state.is_pdf = False
+            if "markdown_editor" in st.session_state:
+                del st.session_state.markdown_editor
             st.rerun()
 
 # --- Display Results ---
@@ -302,10 +303,34 @@ with col_input:
         st.info("Your uploaded file will be displayed here.")
 
 with col_output:
-    st.subheader("OCR Results (Rendered)")
+    st.subheader("OCR Results (Editable)")
     if st.session_state.get('combined_markdown'):
         
-        # --- MODIFIED: Added columns for the two download buttons ---
+        # --- NEW: Tabs for Editing vs Previewing ---
+        tab_edit, tab_preview = st.tabs(["✏️ Edit & Correct", "👁️ Preview"])
+        
+        with tab_edit:
+            # The Text Area. We use 'markdown_editor' key to track state.
+            # The 'value' is set to the OCR result initially.
+            # On subsequent edits, Streamlit updates 'markdown_editor' automatically.
+            edited_text = st.text_area(
+                "Edit the markdown below to fix typos:",
+                value=st.session_state.combined_markdown,
+                height=600,
+                key="markdown_editor",
+                label_visibility="collapsed"
+            )
+            
+            # --- CRITICAL: Update the main session state with your edits ---
+            if edited_text != st.session_state.combined_markdown:
+                st.session_state.combined_markdown = edited_text
+
+        with tab_preview:
+            with st.container(height=600): 
+                st.markdown(st.session_state.combined_markdown, unsafe_allow_html=True)
+
+        # --- Download Buttons (Now use the EDITED text) ---
+        st.markdown("---")
         btn_col1, btn_col2 = st.columns(2)
         
         with btn_col1:
@@ -315,12 +340,12 @@ with col_output:
                 file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
                 mime="text/markdown",
                 key="download_markdown_button_top",
-                help="Downloads the raw Markdown code including embedded base64 images.",
+                help="Downloads the raw Markdown code (including your edits).",
                 use_container_width=True
             )
         
         with btn_col2:
-            # Generate the HTML content on the fly using the new helper function
+            # Generate the HTML content using the EDITED text
             html_content = create_html_content(st.session_state.combined_markdown)
             
             st.download_button(
@@ -329,12 +354,8 @@ with col_output:
                 file_name=f"{st.session_state.current_file_name_stem}_ocr_result.html",
                 mime="text/html",
                 key="download_html_button_top",
-                help="Downloads a standalone HTML file you can view in Chrome/Edge/Firefox.",
+                help="Downloads a standalone HTML file with your corrections.",
                 use_container_width=True
             )
-        # ------------------------------------------------------------
-        
-        with st.container(height=600): 
-            st.markdown(st.session_state.combined_markdown, unsafe_allow_html=True)
     else:
         st.info("OCR results will be rendered here.")
