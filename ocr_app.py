@@ -43,11 +43,11 @@ def display_pdf(pdf_data: bytes, height: int = 600) -> str:
     pdf_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="{height}px" type="application/pdf"></iframe>'
     return pdf_html
 
-# --- NEW FUNCTION: Generate Standalone HTML ---
-def create_html_content(markdown_text: str) -> str:
+# --- NEW FUNCTION: Generate Publish-Ready HTML (Fixed Color Issue) ---
+def create_html_content(markdown_text: str, page_title: str) -> str:
     """
-    Wraps the markdown in a standalone HTML template with MathJax and Marked.js 
-    for perfect rendering in any browser.
+    Wraps the markdown in a standalone HTML template.
+    Forces Light Mode styles to prevent white-on-white text in Dark Mode.
     """
     html_template = f"""
     <!DOCTYPE html>
@@ -55,49 +55,83 @@ def create_html_content(markdown_text: str) -> str:
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OCR Output</title>
+        <meta name="generator" content="Mistral OCR">
+        <title>{page_title}</title>
+        
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+        
         <style>
+            /* Force Light Mode Variables to override system Dark Mode */
+            :root {{
+                --color-canvas-default: #ffffff;
+                --color-canvas-subtle: #f6f8fa;
+                --color-border-default: #d0d7de;
+                --color-fg-default: #24292f;
+                --color-fg-muted: #57606a;
+                --color-accent-fg: #0969da;
+            }}
+
+            body {{
+                background-color: var(--color-canvas-subtle);
+                font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;
+                margin: 0;
+                padding: 20px;
+                color: var(--color-fg-default); /* Force dark text */
+            }}
             .markdown-body {{
                 box-sizing: border-box;
                 min-width: 200px;
                 max-width: 980px;
                 margin: 0 auto;
                 padding: 45px;
+                background-color: var(--color-canvas-default);
+                border: 1px solid var(--color-border-default);
+                border-radius: 6px;
+                box-shadow: 0 3px 6px rgba(140, 149, 159, 0.15);
+                color: #24292f !important; /* CRITICAL: Force text to be black/dark gray */
             }}
             @media (max-width: 767px) {{
                 .markdown-body {{
                     padding: 15px;
                 }}
+                body {{
+                    padding: 10px;
+                }}
             }}
-            /* Ensure images fit within the container */
             img {{
                 max-width: 100%;
+                display: block;
+                margin: 1em auto;
+            }}
+            @media print {{
+                body {{ background-color: white; }}
+                .markdown-body {{ border: none; box-shadow: none; padding: 0; }}
             }}
         </style>
+        
         <script>
         MathJax = {{
             tex: {{
-                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']]
+                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+                displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+                processEscapes: true
             }}
         }};
         </script>
         <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     </head>
-    <body class="markdown-body">
+    <body>
         <div id="raw-markdown" style="display:none;">{markdown_text}</div>
         
-        <div id="content"></div>
+        <article class="markdown-body" id="content">
+            <p style="color:#666; text-align:center;">Loading content...</p>
+        </article>
 
         <script>
-            // Get raw markdown
             const rawMarkdown = document.getElementById('raw-markdown').textContent;
-            
-            // Render Markdown to HTML
             document.getElementById('content').innerHTML = marked.parse(rawMarkdown);
-            
-            // Trigger MathJax to process the new content
             if (typeof MathJax !== 'undefined') {{
                 MathJax.typesetPromise();
             }}
@@ -220,121 +254,4 @@ with st.sidebar:
         )
         if uploaded_file is not None:
             uploaded_file_data = uploaded_file.getvalue()
-            original_name_or_url = uploaded_file.name
-            st.session_state.uploaded_file_data = uploaded_file_data # Save for display
-    
-    elif upload_option == "Enter URL":
-        file_url = st.text_input("Enter File URL (PDF or Image):", key="url_input")
-        if file_url:
-            if not (file_url.startswith("http://") or file_url.startswith("https://")):
-                st.error("Invalid URL format. Must start with http:// or https://")
-            else:
-                uploaded_file_data = get_data_from_url(file_url) # Use cached function
-                original_name_or_url = file_url
-                st.session_state.uploaded_file_data = uploaded_file_data # Save for display
-
-    # --- Process File Name and Type ---
-    if uploaded_file_data:
-        try:
-            path_part = original_name_or_url.split('/')[-1].split('?')[0]
-            file_name_stem = Path(path_part).stem if path_part else "file_from_url"
-        except Exception:
-            file_name_stem = "file_from_url"
-        
-        is_image = any(original_name_or_url.lower().endswith(ext) for ext in SUPPORTED_IMAGE_TYPES)
-        is_pdf = original_name_or_url.lower().endswith('.pdf')
-        
-        st.session_state.current_file_name_stem = file_name_stem
-        st.session_state.is_image = is_image
-        st.session_state.is_pdf = is_pdf
-    else:
-        st.session_state.uploaded_file_data = None
-
-
-    # --- Process & Clear Buttons ---
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        run_disabled = (not api_key or not uploaded_file_data)
-        if st.button("🚀 Run OCR", disabled=run_disabled, key="run_button", use_container_width=True):
-            st.session_state.combined_markdown = None
-            st.session_state.ocr_error = None
-            try:
-                st.session_state.combined_markdown = get_ocr_result(
-                    api_key,
-                    uploaded_file_data,
-                    file_name_stem,
-                    is_image 
-                )
-                st.success("OCR Complete!")
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
-                st.session_state.ocr_error = str(e)
-
-    with col2:
-        if st.button("🧹 Clear", key="clear_button", use_container_width=True):
-            st.session_state.combined_markdown = None
-            st.session_state.ocr_error = None
-            st.session_state.current_file_name_stem = "ocr_result"
-            st.session_state.uploaded_file_data = None
-            st.session_state.is_image = False
-            st.session_state.is_pdf = False
-            st.rerun()
-
-# --- Display Results ---
-
-if st.session_state.get('ocr_error'):
-    st.error(f"Last OCR attempt failed: {st.session_state.ocr_error}")
-
-col_input, col_output = st.columns(2)
-
-with col_input:
-    st.subheader("Your File")
-    if st.session_state.uploaded_file_data:
-        if st.session_state.is_image:
-            st.image(st.session_state.uploaded_file_data, use_container_width=True)
-            
-        elif st.session_state.is_pdf:
-            pdf_html = display_pdf(st.session_state.uploaded_file_data, height=600)
-            st.markdown(pdf_html, unsafe_allow_html=True)
-            
-    else:
-        st.info("Your uploaded file will be displayed here.")
-
-with col_output:
-    st.subheader("OCR Results (Rendered)")
-    if st.session_state.get('combined_markdown'):
-        
-        # --- MODIFIED: Added columns for the two download buttons ---
-        btn_col1, btn_col2 = st.columns(2)
-        
-        with btn_col1:
-            st.download_button(
-                label="⬇️ Download Markdown (.md)",
-                data=st.session_state.combined_markdown,
-                file_name=f"{st.session_state.current_file_name_stem}_ocr_result.md",
-                mime="text/markdown",
-                key="download_markdown_button_top",
-                help="Downloads the raw Markdown code including embedded base64 images.",
-                use_container_width=True
-            )
-        
-        with btn_col2:
-            # Generate the HTML content on the fly using the new helper function
-            html_content = create_html_content(st.session_state.combined_markdown)
-            
-            st.download_button(
-                label="🌐 Download HTML Report",
-                data=html_content,
-                file_name=f"{st.session_state.current_file_name_stem}_ocr_result.html",
-                mime="text/html",
-                key="download_html_button_top",
-                help="Downloads a standalone HTML file you can view in Chrome/Edge/Firefox.",
-                use_container_width=True
-            )
-        # ------------------------------------------------------------
-        
-        with st.container(height=600): 
-            st.markdown(st.session_state.combined_markdown, unsafe_allow_html=True)
-    else:
-        st.info("OCR results will be rendered here.")
+            original_name_or_url
