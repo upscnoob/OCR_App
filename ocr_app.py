@@ -1,5 +1,5 @@
 import streamlit as st
-from mistralai import Mistral, DocumentURLChunk, ImageURLChunk
+from mistralai import Mistral
 from mistralai.models import OCRResponse
 from pathlib import Path
 import requests
@@ -146,7 +146,10 @@ def get_ocr_result(api_key: str, file_data: bytes, file_name_stem: str, is_image
         
         # 3. Run OCR
         ocr_response = client.ocr.process(
-            document=DocumentURLChunk(document_url=signed_url.url),
+            document={
+                "type": "document_url",
+                "document_url": signed_url.url
+            },
             model="mistral-ocr-latest",
             include_image_base64=True
         )
